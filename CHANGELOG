@@ -1,0 +1,10 @@
+TODO
+- manage errors for pdftohtml
+- allow searching through all xml from the simple search
+- enhance diacritics management
+
+2012-07-26
+- Première version du plugin
+- Extraction à la sauvegarde d'une notice si le XML n'est pas présent
+- Suppression du fichier XML lors de la suppression du fichier PDF
+
