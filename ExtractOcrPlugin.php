@@ -12,7 +12,7 @@
 class ExtractOcrPlugin extends Omeka_Plugin_Abstract
 {
     protected $_hooks = array('install', 'uninstall', 'config_form', 'config', 
-                              'after_save_item', 'before_delete_file', 'define_routes', 'public_theme_header');
+                              'after_save_item', 'before_delete_file', 'define_routes', 'public_theme_header', 'public_append_to_items_browse');
     
     protected $_pdfMimeTypes = array('application/pdf', 'application/x-pdf', 
                                      'application/acrobat', 'text/x-pdf', 
@@ -124,6 +124,21 @@ class ExtractOcrPlugin extends Omeka_Plugin_Abstract
 			echo '<link rel="stylesheet" href="'.html_escape(css('extract_ocr_public')). '" />';
 		}
 	}
+
+	public function hookPublicAppendToItemsBrowse()
+	{
+		$pagination = Zend_Registry::get('pagination');
+		$total = $pagination["total_results"];
+		$page = $pagination["page"];
+		$per_page = $pagination["per_page"];
+
+		$val_test = ceil($total / $per_page);
+		if ( ( $val_test == $page) and (isset($_GET["search"])))
+		{
+			print "<div style='padding:3px; width:700px; margin:auto; color:white; background:#222'>Vous pouvez étendre la recherche au texte contenu dans les ouvrages, cette opération est relativement longue : <a style='font-weight:bold; color:white' href='".__v()->url("extract-ocr/results/v2?q=".$_GET["search"])."'>rechercher dans les documents</a>.</div>";
+		}
+	}
+
 
     /**
      * Extract texts from all PDF files belonging to an item.

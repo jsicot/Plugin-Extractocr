@@ -17,6 +17,21 @@ class ExtractOcr_ResultsController extends Omeka_Controller_Action
 		$this->handleHtml($q);
 	}
 
+	public function v2Action()
+	{
+		if (isset($_GET["inside"]))
+		{
+			$results = $this->searchInside($_GET["q"]);
+			$this->_helper->viewRenderer("inside");
+			$this->view->assign(
+				array(
+					'results' => $results,
+					'q' => $_GET["q"]
+				)
+			);
+		}
+	}
+
 	protected function handleHtml($q)
 	{
 		if (isset($_GET["inside"]))
@@ -60,8 +75,7 @@ class ExtractOcr_ResultsController extends Omeka_Controller_Action
 				$first_page = preg_replace('/^.*<page number="(\d*)".*$/siU', '$1', $res);
 			
 				// We then need to know how many matches there are
-				$matches_number = substr_count($res, $q);
-
+				$matches_number = substr_count(strtoupper($res), strtoupper($q));
 				// And last, extract up to 3 lines width a matching example
 				$lines_array = preg_split("/\n/", $res);
 				$snippet = "";
@@ -109,7 +123,8 @@ class ExtractOcr_ResultsController extends Omeka_Controller_Action
 		// First, we search using the classical research function from omeka
 		$results = get_items(
 			array(
-				'search'=>$q
+				'search'=>$q,
+				'public'=>true
 			)
 		);
 		
