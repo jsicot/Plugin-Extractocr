@@ -1,7 +1,9 @@
 <?php
 /**
- * Extract OCR from Omeka's PDF. Creates a .xml file with the same name
- * as .pdf. 
+ * Extract OCR
+ *
+ * Adapted from PDF Text plugin by Roy Rosenzweig Center for History and New Media
+ * @license http://www.gnu.org/licenses/gpl-3.0.txt GNU GPLv3
  * 
  * This plugin is to be combined with Internet Archive Bookreader plugin
  * to allow fulltext search within the viewer.
@@ -9,90 +11,145 @@
  * TODO : Use this plugin to allow fulltext search within the main interface
  * (fulltext search through every PDF at one time). 
  */
-class ExtractOcrPlugin extends Omeka_Plugin_Abstract
+ 
+class ExtractOcrPlugin extends Omeka_Plugin_AbstractPlugin
 {
-    protected $_hooks = array('install', 'uninstall', 'config_form', 'config', 
-                              'after_save_item', 'before_delete_file', 'define_routes', 'public_theme_header', 'public_append_to_items_browse');
-    
-    protected $_pdfMimeTypes = array('application/pdf', 'application/x-pdf', 
-                                     'application/acrobat', 'text/x-pdf', 
-                                     'text/pdf', 'applications/vnd.pdf');
-    
+    protected $_hooks = array(
+        'install',
+        'uninstall',
+        'config_form',
+        'config',
+        'before_save_file',
+        'before_delete_file',
+    );
+
+    protected $_pdfMimeTypes = array(
+        'application/pdf',
+        'application/x-pdf',
+        'application/acrobat',
+        'text/x-pdf',
+        'text/pdf',
+        'applications/vnd.pdf',
+    );
+
     /**
      * Install the plugin.
      */
     public function hookInstall()
     {
-        // Don't install if the pdftohtml command doesn't exist.
-        $output = (int) shell_exec('hash pdftohtml 2>&- || echo -1');
-        if (-1 == $output) {
-            throw new Exception('The pdftohtml command-line utility is not installed. pdftohtml must be installed to install this plugin.');
+        // Don't install if the pdftotext command doesn't exist.
+        // See: http://stackoverflow.com/questions/592620/check-if-a-program-exists-from-a-bash-script
+        if ((int) shell_exec('hash pdftohtml 2>&- || echo 1')) {
+            throw new Omeka_Plugin_Installer_Exception(__('The pdftotext command-line utility ' 
+            . 'is not installed. pdftohtml must be installed to install this plugin.'));
         }
     }
-    
+
     /**
-     * Uninstall the plugin.
+     * Uninstall the plugin
      */
     public function hookUninstall()
     {
+
+
     }
-    
+
     /**
-     * Display the plugin config form.
+     * Display the config form.
      */
     public function hookConfigForm()
     {
-?>
-<div class="field">
-    <label for="save_pdf_texts">Process existing PDF files</label>
-    <div class="inputs">
-        <?php echo __v()->formCheckbox('extract_pdf_texts'); ?>
-    </div>
-    <p class="explanation">This plugin enables searching on PDF files by 
-    extracting their texts and saving them to their parent items. This normally 
-    happens automatically, but there are times when you'll want to extract text 
-    from all PDF files that exist in your Omeka archive; for example, when first 
-    installing this plugin and when items are being created by other plugins. 
-    Check the above box and submit this form to run the text extraction process, 
-    which may take some time to finish.</p>
-</div>
-<?php
+        echo get_view()->partial(
+            'plugins/extract-ocr-config-form.php', 
+            array('valid_storage_adapter' => $this->isValidStorageAdapter())
+        );
     }
-    
+
     /**
-     * Process the plugin config form.
+     * Handle the config form.
      */
     public function hookConfig()
     {
         // Run the text extraction process if directed to do so.
-        if ($_POST['extract_pdf_texts']) {
-            ProcessDispatcher::startProcess('ExtractOcrProcess');
+        if ($_POST['extract_ocr_process'] && $this->isValidStorageAdapter()) {
+            Zend_Registry::get('bootstrap')->getResource('jobs')
+                ->sendLongRunning('ExtractOcrProcess');
         }
     }
-    
+
     /**
-     * Refresh PDF texts to account for an item save.
+     * Add the PDF text to the file record.
+     * 
+     * This has a secondary effect of including the text in the search index.
      */
-    public function hookAfterSaveItem($item)
+    public function hookBeforeSaveFile($args)
     {
-        $this->saveItemPdfText($item);
+        if (!$args['insert']) {
+            return;
+        }
+        $file = $args['record'];
+        // Ignore non-PDF files.
+        if (!in_array($file->mime_type, $this->_pdfMimeTypes)) {
+            return;
+        }
+        $itemid = $file->item_id;
+        $item = get_record_by_id('item', $itemid); 
+        $this->pdfToHtml($file, $item);
+    }
+
+    /**
+     * Extract the text from a PDF file.
+     * 
+     * @param string $path
+     * @return string
+     */
+    public function pdfToHtml($file, $item)
+    {
+        
+        $id = $item->id;
+        $original_filename = $file->original_filename;
+	$xml_filename = preg_replace("/\.pdf$/i", ".xml", $original_filename);
+	
+	$storage = Zend_Registry::get('storage');
+	$tmp_dir = $storage->getTempDir();
+	$tmp_file = $tmp_dir .'/'. basename($xml_filename, ".xml");
+	$tmp_file_escaped = escapeshellarg($tmp_file);
+	
+        //$path = $file->getPath();
+        $path = FILES_DIR . '/original/' . $file->archive_filename;
+        $path = escapeshellarg($path);
+         try {
+              $file = insert_files_for_item($item,
+                                              'Filesystem',
+                                              $tmp_file.".xml",
+                                              array('ignore_invalid_files' => false));
+            } catch (Omeka_File_Ingest_InvalidException $e) {
+                $msg = "Error occurred when attempting to ingest the "
+                     . "importing file: '$tmp_file.xml': "
+                     . $e->getMessage();
+                $this->_log($msg, Zend_Log::ERR);
+                return false;
+            }
+            release_object($file);
     }
     
-    /**
+     /**
      * Refresh PDF texts to account for a file delete.
      */
-    public function hookBeforeDeleteFile($file)
+    public function hookBeforeDeleteFile($args)
     {
-    	// We need to find the xml file associated with the PDF
-		if (!in_array($file->mime_browser, $this->_pdfMimeTypes))
-		{
-			return;
-		}
-	
+        	$file = $args['record'];
+        	// Ignore non-PDF files.
+        	if (!in_array($file->mime_type, $this->_pdfMimeTypes)) {
+            		return;
+        	}
 		$xml_filename = preg_replace("/pdf/i", "xml", $file->original_filename);
 		// We've got an xml file, we need to find if the XML file is available
 		$db = get_db();
-		$query = $db->select("id")->from($db->Files)->where('original_filename = ?', $xml_filename)->where('item_id = ?', $file->item_id);
+		$query = $db->select("id")
+				->from($db->Files)
+				->where('original_filename = ?', $xml_filename)
+				->where('item_id = ?', $file->item_id);
 
 		$file_id = $db->fetchOne($query);
 		if ($file_id)
@@ -102,105 +159,33 @@ class ExtractOcrPlugin extends Omeka_Plugin_Abstract
 		}
     }
     
-	public function hookDefineRoutes($router)
-	{
-		# TODO : débugger et comprendre pourquoi cela ne fonctionne pas
-		# (cd SolrSearch)
-/*		$searchResultsRoute = new Zend_Controller_Router_Route('results',
-			array(
-				'controller' => 'search',
-				'action' => 'results',
-				'module' => 'extract-ocr'
-			)
-		); */
-
-//		$router->addRoute('extract_ocr_results_route', $searchResultsRoute);
-	}
-
-	public function hookPublicThemeHeader($request)
-	{
-		if ($request->getModuleName() == "extract-ocr")
-		{
-			echo '<link rel="stylesheet" href="'.html_escape(css('extract_ocr_public')). '" />';
-		}
-	}
-
-	public function hookPublicAppendToItemsBrowse()
-	{
-		$pagination = Zend_Registry::get('pagination');
-		$total = $pagination["total_results"];
-		$page = $pagination["page"];
-		$per_page = $pagination["per_page"];
-
-		$val_test = ceil($total / $per_page);
-		if ( ( $val_test == $page) and (isset($_GET["search"])))
-		{
-			print "<div style='padding:3px; width:700px; margin:auto; color:white; background:#222'>Vous pouvez étendre la recherche au texte contenu dans les ouvrages, cette opération est relativement longue : <a style='font-weight:bold; color:white' href='".__v()->url("extract-ocr/results/v2?q=".$_GET["search"])."'>rechercher dans les documents</a>.</div>";
-		}
-	}
-
-
-    /**
-     * Extract texts from all PDF files belonging to an item.
-     * 
-     * @param Item $item
-     * @param int $elementId The ID of the "PDF Search::Text" element.
-     * @param int $recordTypeId The ID of the Item record type.
-     */
-    public function saveItemPdfText(Item $item)
-    {
-        // Iterate all files belonging to this item.
-        foreach ($item->Files as $file) {
-            $this->saveFilePdfText($file, $item);
-        }
-    }
     
+
     /**
-     * Extract text from a PDF file and save it to the parent item.
+     * Determine if the plugin supports the storage adapter.
      * 
-     * @param File $file
-     * @param int $elementId The ID of the "PDF Search::Text" element.
-     * @param int $recordTypeId The ID of the Item record type.
+     * pdftotext cannot be used on remote files, so only support the default 
+     * Filesystem adapter, which stores files locally.
+     * 
+     * @return bool
      */
-    public function saveFilePdfText(File $file, $item)
+    public function isValidStorageAdapter()
     {
-        // Ignore non-PDF files.
-        if (!in_array($file->mime_browser, $this->_pdfMimeTypes)) {
-            return;
+        $storageAdapter = Zend_Registry::get('bootstrap')
+            ->getResource('storage')->getAdapter();
+        if (!($storageAdapter instanceof Omeka_Storage_Adapter_Filesystem)) {
+            return false;
         }
-        
-        // Build the XML source
-	$original_filename = $file->original_filename;
-	$xml_filename = preg_replace("/\.pdf$/i", ".xml", $original_filename);
-
-	// We need to check if the XML already exists
-	$pdf_added = $file->added;
-	$pdf_modified = $file->modified;
-
-	$db = get_db();
-	$query = $db->select()->from($db->Files)->where('original_filename = ?', $xml_filename)->where('item_id = ?', $item->id);
-	if (!sizeof($db->fetchAll($query)))
-	{
-		// We don't have the XML file, we need to build it
-		print "Building PDF<br/>";
-		$storage = Zend_Registry::get('storage');
-		$tmp_dir = $storage->getTempDir();
-
-		$path = escapeshellarg(FILES_DIR . '/' . $file->archive_filename);
-		$tmp_file = $tmp_dir . basename($xml_filename, ".xml");
-		$tmp_file_escaped = escapeshellarg($tmp_file);
-
-		$cmd = "pdftohtml -i -c -hidden -xml $path  $tmp_file_escaped";
-		$res = shell_exec($cmd);
-		# TODO : Manage errors for pdftohtml
-
-		// The $tmp_file contains the XML we need to add to our current file
-		insert_files_for_item(
-			$item,
-			'Filesystem',
-			$tmp_file.".xml"
-		);
-	}
+        return true;
     }
 
+    /**
+     * Get the PDF MIME types.
+     * 
+     * @return array
+     */
+    public function getPdfMimeTypes()
+    {
+        return $this->_pdfMimeTypes;
+    }
 }

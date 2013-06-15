@@ -1,23 +1,43 @@
 <?php
-class ExtractOcrProcess extends ProcessAbstract
+
+class ExtractOcrProcess extends Omeka_Job_AbstractJob
 {
-    public function run($args)
+    /**
+     * Process all PDF files in Omeka.
+     */
+    public function perform()
     {
-        $db = get_db();
         
-        $extractOcr = new ExtractOcrPlugin;
-       	print "Test enregistrement log\n";
-        // We're goind to fetch only the item_id having at least one PDF
-	$sql = "SELECT * FROM {$db->File} where original_filename like '%pdf'";
-        $items = $db->fetchAll($sql);
-        foreach ($items as $i) {
-            // Release an existing item to avoid a memory leak in PHP 5.2.
-            if (isset($item)) {
-                release_object($item);
+        $extractOcrPlugin = new ExtractOcrPlugin;
+        $fileTable = $this->_db->getTable('File');
+
+        $select = $this->_db->select()
+            ->from($this->_db->File)
+            ->where('mime_type IN (?)', $extractOcrPlugin->getPdfMimeTypes());
+
+        // Iterate all PDF file records.
+        $pageNumber = 1;
+        while ($files = $fileTable->fetchObjects($select->limitPage($pageNumber, 50))) {
+            foreach ($files as $file) {
+            	 // Build the XML source
+		$original_filename = $file->original_filename;
+		$xml_filename = preg_replace("/\.pdf$/i", ".xml", $original_filename);
+		$itemid = $file->item_id;
+        	$item = get_record_by_id('item', $itemid); 
+		$query = $this->_db->select()
+			->from($this->_db->File)
+			->where('original_filename = ?', $xml_filename)
+			->where('item_id = ?', $itemid);
+			
+		if (!sizeof($this->_db->fetchAll($query))) {
+			$extractOcrPlugin->pdfToHtml($file, $item);
+			
+
+		}
+                // Prevent memory leaks.
+                release_object($file);
             }
-            
-            $item = $db->getTable('Item')->find($i['item_id']);
-            $extractOcr->saveItemPdfText($item);
+            $pageNumber++;
         }
     }
 }

@@ -8,3 +8,6 @@ TODO
 - Extraction à la sauvegarde d'une notice si le XML n'est pas présent
 - Suppression du fichier XML lors de la suppression du fichier PDF
 
+2013-06-15
+- Mise à jour pour Omeka 2.0
+
