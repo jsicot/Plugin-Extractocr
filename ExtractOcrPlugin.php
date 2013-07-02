@@ -108,16 +108,26 @@ class ExtractOcrPlugin extends Omeka_Plugin_AbstractPlugin
         
         $id = $item->id;
         $original_filename = $file->original_filename;
-	$xml_filename = preg_replace("/\.pdf$/i", ".xml", $original_filename);
+		$xml_filename = preg_replace("/\.pdf$/i", ".xml", $original_filename);
 	
-	$storage = Zend_Registry::get('storage');
-	$tmp_dir = $storage->getTempDir();
-	$tmp_file = $tmp_dir .'/'. basename($xml_filename, ".xml");
-	$tmp_file_escaped = escapeshellarg($tmp_file);
-	
-        //$path = $file->getPath();
+		//$storage = Zend_Registry::get('storage');
+		//$tmp_dir = $storage->getTempDir();
+		$tmp_file = sys_get_temp_dir() . DIRECTORY_SEPARATOR . basename($xml_filename, ".xml");
+		$tmp_file_escaped = escapeshellarg($tmp_file);
+        
         $path = FILES_DIR . '/original/' . $file->archive_filename;
+    
+         
+        if (!(touch($path) && file_exists($path))) {
+			$path = $file->getPath();
+        }
+        
         $path = escapeshellarg($path);
+       
+
+		$cmd = "pdftohtml -i -c -hidden -xml $path $tmp_file_escaped";
+		$res = shell_exec($cmd);
+		
          try {
               $file = insert_files_for_item($item,
                                               'Filesystem',
@@ -127,8 +137,9 @@ class ExtractOcrPlugin extends Omeka_Plugin_AbstractPlugin
                 $msg = "Error occurred when attempting to ingest the "
                      . "importing file: '$tmp_file.xml': "
                      . $e->getMessage();
-                $this->_log($msg, Zend_Log::ERR);
-                return false;
+                //$this->_log($msg, Zend_Log::ERR);
+                Zend_Controller_Action_HelperBroker::getStaticHelper('FlashMessenger')->addMessage(__('Error occurred when attempting to ingest the importing file: ' . $tmp_file .'.xml ' . $e->getMessage() .'. Commande : '. $cmd), 'warning');
+				return false;
             }
             release_object($file);
     }
@@ -138,7 +149,7 @@ class ExtractOcrPlugin extends Omeka_Plugin_AbstractPlugin
      */
     public function hookBeforeDeleteFile($args)
     {
-        	$file = $args['record'];
+        $file = $args['record'];
         	// Ignore non-PDF files.
         	if (!in_array($file->mime_type, $this->_pdfMimeTypes)) {
             		return;
