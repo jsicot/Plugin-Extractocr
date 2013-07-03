@@ -113,7 +113,7 @@ class ExtractOcrPlugin extends Omeka_Plugin_AbstractPlugin
 		$tmp_file_escaped = escapeshellarg($tmp_file);        
         $path = FILES_DIR . '/original/' . $file->archive_filename;
 
-       if (!isset($file->archive_filename) || $file->archive_filename == ''){
+        if (!(touch($path))) {
 			$path = $file->getPath();
         }
         
