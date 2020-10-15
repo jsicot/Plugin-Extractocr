@@ -43,7 +43,7 @@ Using the PDF TOC Plugin
 Optional plugins
 ----------------
 
-- [BookReader](https://github.com/jsicot/BookReader) : This plugin adds Internet Archive BookReader into Omeka.
+- [BookReader](https://github.com/jsicot/BookReader) : This plugin adds Internet Archive BookReader into Omeka. If both plugins (BookReader & ExtractOcr) are installed it's possible to search fulltext within BookReader frame. To enable it you need to overwrite Bookreader/libraries/BookReaderCustom.php using Bookreader/libraries/BookReaderCustom_extractOCR.php
 
 
 Troubleshooting

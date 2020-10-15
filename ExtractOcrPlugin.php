@@ -111,12 +111,8 @@ class ExtractOcrPlugin extends Omeka_Plugin_AbstractPlugin
 		$xml_filename = preg_replace("/\.pdf$/i", ".xml", $original_filename);
 		$tmp_file = sys_get_temp_dir() . DIRECTORY_SEPARATOR . basename($xml_filename, ".xml");
 		$tmp_file_escaped = escapeshellarg($tmp_file);        
-        $path = FILES_DIR . '/original/' . $file->archive_filename;
-
-        if (!(touch($path))) {
 			$path = $file->getPath();
-        }
-        
+	        
         $path = escapeshellarg($path);
 		$cmd = "pdftohtml -i -c -hidden -xml $path $tmp_file_escaped";
 		$res = shell_exec($cmd);
